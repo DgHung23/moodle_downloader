@@ -1,0 +1,14 @@
+# Core HTTP & Web Scraping
+requests>=2.31.0
+lxml>=4.9.0
+python-dotenv>=1.0.0
+
+# Terminal Progress Bar
+tqdm>=4.66.0
+
+# Lightweight Web GUI Server
+bottle>=0.13.0
+
+# Chrome & Edge Cookie Decryption (Windows DPAPI & AES-GCM)
+cryptography>=41.0.0
+pywin32>=306; sys_platform == 'win32'

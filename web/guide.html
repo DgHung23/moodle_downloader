@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hướng Dẫn Lấy MoodleSession Bằng Phím F12</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .guide-container {
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 20px 60px;
+    }
+    .guide-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 32px;
+      backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-sm);
+    }
+    .step-box {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .step-title {
+      font-family: var(--font-heading);
+      font-size: 1.1rem;
+      color: #93c5fd;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .step-number {
+      background: #2563eb;
+      color: #fff;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .code-pill {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+    .tip-box {
+      background: rgba(16, 185, 129, 0.1);
+      border-left: 4px solid var(--accent-emerald);
+      padding: 14px 18px;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      margin-top: 16px;
+      font-size: 0.9rem;
+      color: #a7f3d0;
+    }
+  </style>
+</head>
+<body>
+  <div class="guide-container">
+    <div class="guide-card">
+      <div style="margin-bottom: 24px;">
+        <a href="/" class="btn btn-secondary btn-sm" style="margin-bottom: 16px;">&larr; Quay lại trang chủ</a>
+        <h1 style="font-family: var(--font-heading); font-size: 1.8rem; margin-bottom: 8px;">
+          🔑 Cách Lấy MoodleSession Bằng Phím F12
+        </h1>
+        <p style="color: var(--text-muted);">
+          Dành cho bất kỳ trình duyệt nào: <strong>Google Chrome, Microsoft Edge, Brave, Cốc Cốc, Safari, Firefox</strong>.
+        </p>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">
+          <span class="step-number">1</span>
+          Truy cập Moodle và Đăng nhập
+        </div>
+        <p>Mở trình duyệt của bạn và truy cập vào địa chỉ: <a href="https://moodlecurrent.gre.ac.uk/" target="_blank" style="color:#60a5fa;">https://moodlecurrent.gre.ac.uk/</a>. Đảm bảo bạn đã đăng nhập và nhìn thấy danh sách môn học của mình.</p>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">
+          <span class="step-number">2</span>
+          Mở Công Cụ Nhà Phát Triển (DevTools)
+        </div>
+        <p>Nhấn phím <span class="code-pill">F12</span> trên bàn phím (hoặc click chuột phải bất kỳ đâu trên trang và chọn <strong>Inspect</strong> / <strong>Kiểm tra</strong>).</p>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">
+          <span class="step-number">3</span>
+          Tìm Cookie MoodleSession
+        </div>
+        <p style="margin-bottom: 8px;">Ở thanh công cụ trên cùng của cửa sổ DevTools vừa mở:</p>
+        <ul style="margin-left: 24px; margin-bottom: 10px; color: var(--text-muted);">
+          <li>Nếu dùng <strong>Chrome / Edge / Brave</strong>: Chọn tab <strong>Application</strong> (hoặc Ứng dụng).</li>
+          <li>Nếu dùng <strong>Firefox</strong>: Chọn tab <strong>Storage</strong> (hoặc Bộ nhớ).</li>
+        </ul>
+        <p style="margin-bottom: 8px;">Tại cột menu bên trái:</p>
+        <ul style="margin-left: 24px; color: var(--text-muted);">
+          <li>Mở rộng mục <strong>Cookies</strong> &rarr; Click chọn <strong>https://moodlecurrent.gre.ac.uk</strong>.</li>
+          <li>Ở bảng bên phải, tìm dòng có cột <strong>Name</strong> là <span class="code-pill">MoodleSession</span>.</li>
+        </ul>
+      </div>
+
+      <div class="step-box">
+        <div class="step-title">
+          <span class="step-number">4</span>
+          Copy và Dán Vào Ứng Dụng
+        </div>
+        <p>Double-click vào giá trị trong cột <strong>Value</strong> và copy chuỗi ký tự đó. Sau đó dán vào ô <strong>MoodleSession Cookie</strong> trên giao diện Moodle Crawler và nhấn <strong>Fetch Các Môn Học</strong>!</p>
+      </div>
+
+      <div class="tip-box">
+        💡 <strong>Mẹo:</strong> Nếu bạn đang dùng máy tính này với <strong>Firefox</strong>, bạn chỉ cần bấm nút <strong>🦊 Firefox</strong> ở trang chủ là ứng dụng sẽ tự động lấy cookie ngay mà không cần làm thủ công!
+      </div>
+    </div>
+  </div>
+</body>
+</html>
