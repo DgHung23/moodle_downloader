@@ -34,6 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
   let isDedupActive = true; // Mặc định bật lọc trùng lặp cho giảng viên & sinh viên
   let pollInterval = null;
 
+  // Khôi phục session từ localStorage nếu có
+  const savedSession = localStorage.getItem('moodle_session');
+  if (savedSession && sessionInput) {
+    sessionInput.value = savedSession;
+  }
+
   // 1. Tự động phát hiện phiên đăng nhập từ các trình duyệt
   async function detectFromBrowser(browserName, btn) {
     const originalContent = btn.innerHTML;
@@ -54,6 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (data.status === 'ok') {
         if (data.moodle_session) {
           sessionInput.value = data.moodle_session;
+          localStorage.setItem('moodle_session', data.moodle_session);
           showFeedback('success', `Đã tự động lấy MoodleSession từ ${title}!`);
         } else {
           showFeedback('success', data.message || `Đã kết nối phiên đăng nhập từ ${title}.`);
@@ -88,6 +95,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. Fetch danh sách môn học
   btnFetchCourses.addEventListener('click', async () => {
     const sessionId = sessionInput.value.trim();
+    if (sessionId) {
+      localStorage.setItem('moodle_session', sessionId);
+    }
     setFetchLoading(true);
 
     try {

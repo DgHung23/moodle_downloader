@@ -51,19 +51,23 @@ class MoodleCrawler:
         self.session = session
         self.allowed_extensions = [ext.lower() for ext in (allowed_extensions or DEFAULT_EXTENSIONS)]
 
-    def _safe_get(self, url: str, retries: int = 3, backoff: float = 2.0, **kwargs) -> Optional[requests.Response]:
+    def _safe_get(self, url: str, retries: int = 4, backoff: float = 1.5, **kwargs) -> Optional[requests.Response]:
         """Gửi GET request với cơ chế tự động thử lại nhiều lần nếu mạng bị chập chờn."""
+        timeout = kwargs.pop("timeout", 45)
         for attempt in range(1, retries + 1):
             try:
                 time.sleep(REQUEST_DELAY)
-                res = self.session.get(url, timeout=30, **kwargs)
+                res = self.session.get(url, timeout=timeout, **kwargs)
+                if res.status_code in [500, 502, 503, 504]:
+                    raise requests.HTTPError(f"HTTP status {res.status_code}")
                 return res
             except Exception as e:
                 if attempt == retries:
                     print(f"    [!] Lỗi kết nối sau {retries} lần thử ({url[:60]}...): {e}", flush=True)
                     return None
-                print(f"    [!] Mạng chập chờn ({e}). Đang thử lại lần {attempt + 1}/{retries} sau {backoff * attempt}s...", flush=True)
-                time.sleep(backoff * attempt)
+                wait_time = backoff * attempt
+                print(f"    [!] Mạng chập chờn ({e}). Đang thử lại lần {attempt + 1}/{retries} sau {wait_time:.1f}s...", flush=True)
+                time.sleep(wait_time)
         return None
 
     def get_enrolled_courses(self) -> List[MoodleCourse]:

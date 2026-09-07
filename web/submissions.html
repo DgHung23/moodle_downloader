@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Greenwich Moodle - Quản Lý Bài Nộp Sinh Viên (Turnitin)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="background-decorations">
+    <div class="glow-orb orb-1"></div>
+    <div class="glow-orb orb-2"></div>
+    <div class="glow-orb orb-3"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Global Loading & Step Progress Modal Overlay -->
+    <div id="global-loading-overlay" class="global-loading-overlay hidden">
+      <div class="glass-card loading-modal-card">
+        <div class="loading-spinner-wrapper">
+          <div class="spinner-ring"></div>
+          <div class="spinner-core">🎓</div>
+        </div>
+        <h3 id="loading-modal-title" class="loading-modal-title">Đang Tải Dữ Liệu Từ Moodle...</h3>
+        <p id="loading-modal-subtitle" class="loading-modal-subtitle">Hệ thống đang kết nối và nạp danh sách hơn 120 lớp học của Giảng viên.</p>
+        
+        <!-- Multi-step Indicator -->
+        <div class="loading-steps-list">
+          <div class="loading-step-item" id="step-verify">
+            <span class="step-icon">⏳</span>
+            <span class="step-text">Xác thực phiên MoodleSession Giảng viên</span>
+          </div>
+          <div class="loading-step-item" id="step-courses">
+            <span class="step-icon">⚪</span>
+            <span class="step-text">Nạp danh sách khóa học từ Moodle Home</span>
+          </div>
+          <div class="loading-step-item" id="step-grouping">
+            <span class="step-icon">⚪</span>
+            <span class="step-text">Tự động gộp thành các môn học & phân loại lớp</span>
+          </div>
+        </div>
+
+        <div class="loading-modal-note">
+          <span>⚡ <strong>Tối ưu hóa:</strong> Dữ liệu sẽ được tự động lưu bộ nhớ đệm (cache). Các lần xem tiếp theo sẽ mở tức thì không cần chờ!</span>
+        </div>
+
+        <button id="btn-cancel-modal-loading" class="btn btn-secondary btn-sm" style="margin-top: 18px;">
+          Đóng / Ẩn Bảng Chờ
+        </button>
+      </div>
+    </div>
+
+    <!-- Top Navigation Switcher -->
+    <nav class="app-navigation">
+      <a href="/" class="nav-tab">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+        <span>📁 Tải Tài Liệu Học Tập</span>
+      </a>
+      <a href="/submissions" class="nav-tab active">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+          <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+        </svg>
+        <span>🎓 Quản Lý Bài Nộp Sinh Viên</span>
+        <span class="tab-badge">GIẢNG VIÊN</span>
+      </a>
+    </nav>
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="brand-logo" style="background: linear-gradient(135deg, #8b5cf6, #3b82f6);">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+        </div>
+        <div>
+          <div style="display: flex; align-items: center; flex-wrap: wrap;">
+            <h1 class="brand-title">Moodle Submissions Manager</h1>
+            <span id="lecturer-status-badge" class="lecturer-badge-pill">
+              <span class="pulsing-dot" style="width: 6px; height: 6px;"></span>
+              Chờ xác thực
+            </span>
+          </div>
+          <p class="brand-subtitle">Đại học Greenwich &bull; Xem hạn nộp gần đây, Similarity & Tải bài nộp Turnitin</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-open-submissions-folder" class="btn btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Mở Thư Mục Submissions
+        </button>
+      </div>
+    </header>
+
+    <!-- Session Configuration Card -->
+    <section class="glass-card session-card">
+      <div class="card-header">
+        <div class="card-header-icon" style="background: rgba(139, 92, 246, 0.15); color: #c4b5fd;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <div>
+          <h2 class="card-title">Phiên Đăng Nhập Giảng Viên (Instructor Session)</h2>
+          <p class="card-desc">Nhập MoodleSession của Giảng viên để có quyền xem các đợt nộp Turnitin và tải bài làm của sinh viên.</p>
+        </div>
+      </div>
+
+      <div class="session-form">
+        <div class="input-group">
+          <label for="sub-session-input">MoodleSession Cookie (Giảng viên)</label>
+          <div class="input-wrapper">
+            <input 
+              type="text" 
+              id="sub-session-input" 
+              placeholder="Dán MoodleSession của giảng viên tại đây, hoặc bấm tự động tìm từ trình duyệt..." 
+              autocomplete="off"
+            />
+          </div>
+          <div class="browser-detect-row">
+            <span class="detect-label">⚡ Tự động tìm:</span>
+            <button id="btn-sub-detect-firefox" class="btn btn-browser" title="Tự động trích xuất cookie từ Mozilla Firefox">
+              🦊 Firefox
+            </button>
+            <button id="btn-sub-detect-edge" class="btn btn-browser" title="Tự động trích xuất cookie từ Microsoft Edge">
+              🌊 Edge
+            </button>
+            <button id="btn-sub-detect-chrome" class="btn btn-browser" title="Tự động trích xuất cookie từ Google Chrome">
+              🌐 Chrome
+            </button>
+            <a href="/static/guide.html" target="_blank" class="btn btn-browser btn-help" title="Xem hướng dẫn lấy MoodleSession bằng phím F12">
+              ❓ Hướng dẫn F12
+            </a>
+          </div>
+        </div>
+        <div class="session-actions">
+          <button id="btn-sub-fetch-courses" class="btn btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span>Tải Danh Sách Môn Học</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="sub-session-feedback" class="session-feedback hidden"></div>
+    </section>
+
+    <!-- Stats Counter Bar -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon stat-blue">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Môn Học (Đã gộp lớp)</span>
+          <span class="stat-value" id="stat-sub-subjects">0</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon stat-purple">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 11 12 14 22 4"></polyline>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Đợt Nộp Turnitin</span>
+          <span class="stat-value" id="stat-sub-drops">0</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon stat-emerald">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Bài Nộp Đã Lưu</span>
+          <span class="stat-value" id="stat-sub-files">0</span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon stat-amber">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </div>
+        <div class="stat-info">
+          <span class="stat-label">Trạng Thái Tải</span>
+          <span class="stat-value status-badge ready" id="stat-sub-status">Sẵn sàng</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Live Download Progress Banner -->
+    <div id="sub-live-progress-card" class="glass-card live-progress-card hidden">
+      <div class="live-progress-header">
+        <div class="live-progress-title">
+          <span class="pulsing-dot"></span>
+          <span id="sub-live-title">Đang tải bài nộp: ...</span>
+        </div>
+        <button id="btn-sub-cancel-download" class="btn btn-danger btn-sm">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+          Dừng Tải
+        </button>
+      </div>
+      <div class="live-current-file">
+        <span class="file-icon">📄</span>
+        <span id="sub-live-file" class="file-text">Đang kết nối Turnitin...</span>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill indeterminate" id="sub-live-progress-bar"></div>
+      </div>
+    </div>
+
+    <!-- Batch Download Complete Banner (Shown when finished) -->
+    <div id="batch-download-done-card" class="batch-download-done-card hidden">
+      <div class="batch-done-info">
+        <span style="font-size: 1.5rem;">🎉</span>
+        <div>
+          <strong id="batch-done-title" style="color: #6ee7b7; font-size: 1rem;">Đã tải xong toàn bộ bài nộp!</strong>
+          <p id="batch-done-desc" style="color: #cbd5e1; font-size: 0.85rem; margin-top: 2px;">Các file đã được lưu an toàn và đóng gói sẵn sàng.</p>
+        </div>
+      </div>
+      <div class="batch-done-actions">
+        <button id="btn-download-last-zip-file" class="btn btn-accent btn-sm">
+          ⬇️ Tải File ZIP Về Máy
+        </button>
+        <button id="btn-open-done-folder" class="btn btn-secondary btn-sm">
+          📂 Mở Thư Mục
+        </button>
+      </div>
+    </div>
+
+    <!-- SECTION: Subject-Centric Course Explorer -->
+    <section id="subjects-explorer-section">
+      <div class="subjects-toolbar">
+        <div class="search-box" style="margin: 0; min-width: 320px; flex: 1;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="subject-search-input" placeholder="Tìm môn học theo mã (COMP-1857) hoặc tên môn..." />
+        </div>
+
+        <div class="filter-chips-row">
+          <span style="color: var(--text-dim); font-size: 0.82rem; font-weight: 600;">Năm học:</span>
+          <button class="filter-chip active" data-year="all">Tất cả năm</button>
+          <button class="filter-chip" data-year="2025-26">2025-26</button>
+          <button class="filter-chip" data-year="2024-25">2024-25</button>
+        </div>
+
+        <button id="btn-sub-refresh-subjects" class="btn btn-secondary btn-sm" title="Xóa bộ nhớ đệm và tải lại dữ liệu mới nhất từ Moodle">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          <span>Làm Mới</span>
+        </button>
+      </div>
+
+      <!-- Skeleton Loading for Subjects -->
+      <div id="subjects-skeleton" class="subjects-grid hidden">
+        <div class="skeleton-card">
+          <div class="skeleton-shimmer"></div>
+          <div class="skeleton-row" style="width: 40%;"></div>
+          <div class="skeleton-row" style="width: 85%; height: 18px; margin: 12px 0;"></div>
+          <div class="skeleton-row" style="width: 60%;"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-shimmer"></div>
+          <div class="skeleton-row" style="width: 35%;"></div>
+          <div class="skeleton-row" style="width: 90%; height: 18px; margin: 12px 0;"></div>
+          <div class="skeleton-row" style="width: 55%;"></div>
+        </div>
+        <div class="skeleton-card">
+          <div class="skeleton-shimmer"></div>
+          <div class="skeleton-row" style="width: 45%;"></div>
+          <div class="skeleton-row" style="width: 80%; height: 18px; margin: 12px 0;"></div>
+          <div class="skeleton-row" style="width: 70%;"></div>
+        </div>
+      </div>
+
+      <!-- Error State for Subjects -->
+      <div id="subjects-error-container" class="glass-card error-retry-card hidden">
+        <div class="error-retry-info">
+          <div class="error-icon-box">⚠️</div>
+          <div>
+            <h3 id="subjects-error-title" class="error-retry-title">Không thể tải danh sách môn học</h3>
+            <p id="subjects-error-desc" class="error-retry-desc">Kết nối mạng tới máy chủ Greenwich Moodle bị ngắt quãng hoặc thời gian chờ quá lâu.</p>
+          </div>
+        </div>
+        <div class="error-retry-actions">
+          <button id="btn-retry-subjects" class="btn btn-primary btn-sm">
+            🔄 Thử Lại Ngay (Retry)
+          </button>
+        </div>
+      </div>
+
+      <!-- Subject Cards Grid -->
+      <div id="subjects-grid" class="subjects-grid">
+        <!-- Injected via JavaScript -->
+      </div>
+    </section>
+
+    <!-- SECTION: Active Subject Header & Class Switcher -->
+    <section id="active-subject-header" class="active-subject-header hidden">
+      <div class="active-subject-info">
+        <div>
+          <h2 class="active-subject-title">
+            <span id="active-subject-code" style="color: #60a5fa;">COMP-1857</span>
+            <span id="active-subject-name">Introduction to Data Science</span>
+          </h2>
+          <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 4px;">
+            <span id="active-subject-stats">5 lớp học &bull; Năm học 2025-26</span>
+          </p>
+        </div>
+        <button id="btn-back-to-subjects" class="btn btn-secondary btn-sm">
+          ← Chọn Môn Khác
+        </button>
+      </div>
+
+      <div class="class-switcher-bar">
+        <span class="class-switcher-label">Chọn lớp:</span>
+        <div id="class-pills-container" style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <!-- Injected via JavaScript -->
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION: Submission Drops with Deadline Filters -->
+    <section id="drops-section" class="hidden">
+      <div class="subjects-toolbar" style="margin-bottom: 16px;">
+        <div class="section-title-row">
+          <h2 style="font-family: var(--font-heading); font-size: 1.25rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+            <span>📋 Các Đợt Nộp Bài Coursework</span>
+            <span id="drops-count-badge" class="filter-badge on" style="font-size: 0.75rem;">0 đợt</span>
+          </h2>
+        </div>
+
+        <div class="filter-chips-row">
+          <span style="color: var(--text-dim); font-size: 0.82rem; font-weight: 600;">Lọc theo hạn:</span>
+          <button class="filter-chip active" data-deadline="all">Tất cả đợt</button>
+          <button class="filter-chip" data-deadline="urgent" style="color: #fca5a5;">🔥 Sắp tới hạn / Gần đây</button>
+          <button class="filter-chip" data-deadline="open" style="color: #6ee7b7;">🟢 Đang mở nộp</button>
+          <button class="filter-chip" data-deadline="closed">⚪ Đã kết thúc</button>
+        </div>
+      </div>
+
+      <!-- Skeleton Loading for Drops -->
+      <div id="drops-skeleton" class="drops-container hidden">
+        <div class="skeleton-drop-card">
+          <div class="skeleton-shimmer"></div>
+          <div class="skeleton-row" style="width: 30%; height: 16px;"></div>
+          <div class="skeleton-row" style="width: 70%; height: 20px; margin: 10px 0;"></div>
+          <div class="skeleton-row" style="width: 50%;"></div>
+        </div>
+        <div class="skeleton-drop-card">
+          <div class="skeleton-shimmer"></div>
+          <div class="skeleton-row" style="width: 25%; height: 16px;"></div>
+          <div class="skeleton-row" style="width: 65%; height: 20px; margin: 10px 0;"></div>
+          <div class="skeleton-row" style="width: 45%;"></div>
+        </div>
+      </div>
+
+      <!-- Error State for Drops -->
+      <div id="drops-error-container" class="glass-card error-retry-card hidden">
+        <div class="error-retry-info">
+          <div class="error-icon-box">⚠️</div>
+          <div>
+            <h3 id="drops-error-title" class="error-retry-title">Không thể quét các đợt nộp bài</h3>
+            <p id="drops-error-desc" class="error-retry-desc">Moodle phản hồi chậm hoặc tạm thời gián đoạn.</p>
+          </div>
+        </div>
+        <div class="error-retry-actions">
+          <button id="btn-retry-drops" class="btn btn-primary btn-sm">
+            🔄 Thử Lại Quét Đợt Nộp
+          </button>
+        </div>
+      </div>
+
+      <!-- Drops Cards Container -->
+      <div id="drops-list-container" class="drops-container">
+        <!-- Injected via JavaScript -->
+      </div>
+    </section>
+
+    <!-- SECTION: Submissions Table & Full Download -->
+    <section id="submissions-viewer-section" class="glass-card hidden" style="padding: 24px; margin-bottom: 32px;">
+      <!-- Part Tabs Selector -->
+      <div id="part-tabs-container" class="part-tabs-container">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Part Metadata Summary -->
+      <div id="part-meta-summary" class="part-meta-summary">
+        <!-- Injected via JS -->
+      </div>
+
+      <!-- Submissions Table Toolbar -->
+      <div class="sub-table-toolbar">
+        <div class="sub-toolbar-left">
+          <div class="search-box" style="margin: 0; max-width: 320px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="sub-search-input" placeholder="Tìm theo tên sinh viên hoặc MSSV..." />
+          </div>
+
+          <select id="sub-filter-status" class="custom-select" style="padding: 8px 12px; font-size: 0.85rem; width: auto; min-width: 140px;">
+            <option value="all">Tất cả sinh viên</option>
+            <option value="submitted">Chỉ sinh viên đã nộp</option>
+            <option value="missing">Chưa nộp bài</option>
+          </select>
+        </div>
+
+        <div class="sub-toolbar-right">
+          <button id="btn-download-selected" class="btn btn-secondary btn-sm" disabled>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            <span id="btn-download-selected-text">Tải bài đã chọn (0)</span>
+          </button>
+
+          <button id="btn-download-all-part" class="btn btn-accent btn-sm">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"></path>
+              <path d="M12 12v9"></path>
+              <path d="m8 17 4 4 4-4"></path>
+            </svg>
+            <span>Tải Toàn Bộ Part Này (Kèm ZIP)</span>
+          </button>
+
+          <button id="btn-download-turnitin-zip" class="btn btn-browser btn-sm" title="Tải trực tiếp 1 file ZIP chính thức nén từ Turnitin">
+            📦 Tải ZIP Turnitin
+          </button>
+
+          <button id="btn-open-part-folder" class="btn btn-secondary btn-sm" title="Mở thư mục lưu bài nộp này trong Explorer">
+            📂 Mở Thư Mục
+          </button>
+        </div>
+      </div>
+
+      <!-- Data Table -->
+      <div class="table-responsive-container">
+        <table class="submissions-table">
+          <thead>
+            <tr>
+              <th style="width: 40px; text-align: center;">
+                <input type="checkbox" id="check-all-submissions" class="custom-checkbox" title="Chọn tất cả sinh viên đã nộp" />
+              </th>
+              <th style="min-width: 180px;">Sinh Viên</th>
+              <th style="min-width: 160px;">Tiêu Đề Bài Nộp</th>
+              <th style="min-width: 130px;">Thời Gian Nộp</th>
+              <th style="min-width: 100px; text-align: center;">Tương Đồng (Similarity)</th>
+              <th style="min-width: 90px; text-align: center;">Điểm Số</th>
+              <th style="min-width: 110px; text-align: center;">Trạng Thái</th>
+              <th style="min-width: 130px; text-align: center;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="submissions-table-body">
+            <!-- Injected via JavaScript -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Empty State / Placeholder -->
+    <div id="sub-empty-state" class="empty-state">
+      <div class="empty-icon">🎓</div>
+      <h3>Chưa chọn môn học hoặc đợt nộp bài</h3>
+      <p>Nhấn nút <strong>"Tải Danh Sách Môn Học"</strong> ở trên, sau đó chọn một môn học để xem các đợt nộp và hạn nộp gần đây.</p>
+    </div>
+
+    <!-- Activity Log Panel -->
+    <section class="glass-card logs-panel" style="margin-top: 32px;">
+      <div class="logs-header" id="sub-logs-toggle">
+        <div class="logs-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="4 17 10 11 4 5"></polyline>
+            <line x1="12" y1="19" x2="20" y2="19"></line>
+          </svg>
+          Nhật ký hoạt động Submissions
+        </div>
+        <span class="logs-toggle-indicator">▼</span>
+      </div>
+      <div class="logs-content" id="sub-logs-body">
+        <div class="log-entry info"><span class="log-time">[00:00:00]</span> Trang quản lý bài nộp Turnitin sẵn sàng.</div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/submissions.js"></script>
+</body>
+</html>

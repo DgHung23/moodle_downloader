@@ -51,7 +51,7 @@ def format_course_folder_name(raw_name: str) -> str:
     m = re.match(r'^([A-Z]+-\d+|[A-Z]\d+)(?:-[A-Za-z0-9]+)*(?:-\d{4}-\d{2})?\s+(.*)$', name)
     if m:
         code = m.group(1).strip()
-        title = m.group(2).strip()
+        title = m.group(2).strip().lstrip("- ").strip()
         if title:
             return f"{code} - {title}"
         return code
