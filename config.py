@@ -8,6 +8,7 @@ load_dotenv()
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUTS_DIR = Path(os.getenv("OUTPUTS_DIR", BASE_DIR / "outputs"))
 SUBMISSIONS_OUTPUT_DIR = Path(os.getenv("SUBMISSIONS_OUTPUT_DIR", OUTPUTS_DIR / "submissions"))
+FORM_SUBMISSIONS_DIR = Path(os.getenv("FORM_SUBMISSIONS_DIR", OUTPUTS_DIR / "form_submissions"))
 
 # Moodle Greenwich URLs
 MOODLE_BASE_URL = os.getenv("MOODLE_BASE_URL", "https://moodlecurrent.gre.ac.uk")
