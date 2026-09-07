@@ -201,6 +201,11 @@
         </div>
       </div>
 
+      <!-- Sheet explanation callout -->
+      <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 18px; font-size: 0.86rem; color: #cbd5e1; line-height: 1.5;">
+        💡 <strong>Cấu trúc file Form.xls:</strong> Biểu mẫu của Đại học Greenwich gồm nhiều sheet (các sheet <em>Portfolio</em> và <em>Contribution</em> là trang mẫu cho khoa Kinh tế). Hệ thống đã <strong>tự động nhận diện và chọn "Mark sheet"</strong> là bảng điểm chính của lớp gồm đầy đủ 62 sinh viên và Paper ID.
+      </div>
+
       <!-- Sheet Selector Tabs -->
       <div style="margin-bottom: 20px;">
         <label style="display: block; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">
@@ -241,10 +246,41 @@
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
-          <span>🔍 Bắt Đầu Đối Khớp Với Moodle</span>
+          <span id="btn-match-text">🔍 Khớp Với Moodle & Kiểm Tra Bài Nộp</span>
         </button>
       </div>
     </section>
+
+    <!-- Realtime Matching Progress Card -->
+    <section id="step-matching-progress-card" class="glass-card hidden" style="margin-bottom: 24px; padding: 24px; border: 1px solid rgba(59, 130, 246, 0.35); background: rgba(30, 41, 59, 0.7);">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="pulsing-dot" style="background: #3b82f6; width: 10px; height: 10px;"></span>
+          <div>
+            <h3 style="font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin: 0 0 4px 0;">
+              Đang Tìm Kiếm & Đối Khớp Bài Nộp Với Moodle...
+            </h3>
+            <p id="match-status-text" style="font-size: 0.85rem; color: var(--text-muted); margin: 0;">
+              Đang kết nối Greenwich Moodle...
+            </p>
+          </div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 1.25rem; font-weight: 700; color: #60a5fa;" id="match-fraction-display">
+            0 / 0 bài đã tìm thấy
+          </div>
+          <div style="font-size: 0.8rem; color: var(--text-muted);" id="match-percent-text">
+            0%
+          </div>
+        </div>
+      </div>
+
+      <!-- Animated Progress Bar -->
+      <div class="progress-bar-track" style="height: 14px; border-radius: 7px; background: rgba(0,0,0,0.4); overflow: hidden; margin-bottom: 8px;">
+        <div id="match-progress-fill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #3b82f6, #8b5cf6, #10b981); transition: width 0.35s ease; border-radius: 7px;"></div>
+      </div>
+    </section>
+
 
     <!-- Step 3: Match Results & Students Preview Table -->
     <section id="step-students-card" class="glass-card students-table-card hidden" style="margin-bottom: 24px;">
@@ -381,32 +417,25 @@
               <span style="font-size: 2.2rem;">🎉</span>
               <div>
                 <h3 style="margin: 0 0 4px 0; color: #34d399; font-size: 1.1rem; font-weight: 700;">
-                  Hoàn Tất Tải Bài Nộp & Đóng Gói Thành Công!
+                  Hoàn Tất Tải Toàn Bộ Bài Nộp!
                 </h3>
                 <p style="margin: 0; color: var(--text-muted); font-size: 0.85rem;" id="post-download-subtitle">
-                  Đã tạo thư mục phân cấp kèm file Báo Cáo Tổng Hợp và gói ZIP hoàn chỉnh.
+                  Đã lưu các bài nộp vào thư mục phân cấp theo lớp kèm file BÁO_CÁO_TỔNG_HỢP.txt. Bạn có thể mở thư mục để chấm điểm ngay.
                 </p>
               </div>
             </div>
 
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-              <a id="btn-download-zip-file" href="/api/form-filter/download-zip" class="btn btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); text-decoration: none;">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                <span>📦 Tải File ZIP Về Máy</span>
-              </a>
-              <button id="btn-open-result-folder" class="btn btn-secondary">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <button id="btn-open-result-folder" class="btn btn-primary btn-lg" style="background: linear-gradient(135deg, #10b981, #059669);">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                 </svg>
-                <span>📂 Mở Thư Mục</span>
+                <span>📂 Mở Thư Mục Chứa Bài Nộp</span>
               </button>
             </div>
           </div>
         </div>
+
       </div>
     </section>
 

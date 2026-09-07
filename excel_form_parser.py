@@ -51,6 +51,9 @@ class FormSheetData:
     students_with_paper_id: int = 0
     classes: List[str] = field(default_factory=list)
     students: List[FormStudentItem] = field(default_factory=list)
+    is_primary: bool = False
+    is_template_sample: bool = False
+    display_title: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -63,8 +66,12 @@ class FormSheetData:
             "total_students": self.total_students,
             "students_with_paper_id": self.students_with_paper_id,
             "classes": self.classes,
+            "is_primary": self.is_primary,
+            "is_template_sample": self.is_template_sample,
+            "display_title": self.display_title or self.sheet_name,
             "students": [s.to_dict() for s in self.students]
         }
+
 
 
 @dataclass
@@ -98,7 +105,7 @@ def _clean_cell_str(val: Any) -> str:
 
 
 def _clean_id_str(val: Any) -> str:
-    """Làm sạch Paper ID hoặc Greenwich ID tránh lỗi số float (VD: 287632096.0 -> 287632096)"""
+    """Làm sạch Greenwich ID hoặc mã định danh tránh lỗi số float (VD: 001342686.0 -> 001342686)"""
     s = _clean_cell_str(val)
     if not s or s.lower() in ["none", "null", "-", "--"]:
         return ""
@@ -110,6 +117,26 @@ def _clean_id_str(val: Any) -> str:
     if m and len(m.group(1)) >= 6:
         return m.group(1)
     return s
+
+
+def _clean_paper_id(val: Any) -> str:
+    """
+    Làm sạch Turnitin Paper ID với cơ chế thẩm định chặt chẽ.
+    Turnitin Paper ID luôn là chuỗi số có độ dài từ 7 đến 12 chữ số (VD: 287632096).
+    Các giá trị như điểm số (VD: '42', '50.0'), ký tự text hoặc số quá ngắn (< 7 chữ số)
+    chắc chắn KHÔNG PHẢI là Paper ID hợp lệ và sẽ được trả về rỗng "".
+    """
+    s = _clean_cell_str(val)
+    if not s or s.lower() in ["none", "null", "-", "--"]:
+        return ""
+    if re.match(r'^\d+\.0$', s):
+        s = s[:-2]
+    # Bắt buộc phải là chuỗi toàn số và có độ dài ít nhất 7 chữ số
+    m = re.match(r'^(\d+)$', s)
+    if m and len(m.group(1)) >= 7:
+        return m.group(1)
+    return ""
+
 
 
 def parse_excel_file(file_source: Union[str, Path, bytes], filename: str = "") -> FormParseResult:
@@ -162,19 +189,36 @@ def _parse_xlrd(content_bytes: bytes, filename: str) -> FormParseResult:
         sheet_data = _analyze_and_extract_sheet_rows(sname, rows)
         result.sheets.append(sheet_data)
 
-    # Chọn primary sheet ưu tiên sheet có điểm số cao nhất (nhiều sinh viên & có Paper ID)
+    _finalize_sheet_metadata(result)
+    return result
+
+
+def _finalize_sheet_metadata(result: FormParseResult):
+    """
+    Xác định sheet điểm chính (Primary Sheet) và phân loại các sheet mẫu template.
+    Ưu tiên sheet có sinh viên và có Paper ID thực tế.
+    """
     best_sheet = ""
     best_score = -1
     for s in result.sheets:
         if s.sheet_type == "skip":
             continue
-        score = s.total_students + (s.students_with_paper_id * 2)
+        # Ưu tiên cao nhất cho sheet có Paper ID thực tế (thường là Mark sheet của Computing)
+        score = s.total_students + (s.students_with_paper_id * 5)
         if score > best_score:
             best_score = score
             best_sheet = s.sheet_name
     result.primary_sheet_name = best_sheet
 
-    return result
+    for s in result.sheets:
+        if s.sheet_name == best_sheet:
+            s.is_primary = True
+            s.display_title = f"{s.sheet_name} (Bảng điểm chính - {s.total_students} SV)"
+        elif s.students_with_paper_id == 0 and s.total_students <= 35:
+            s.is_template_sample = True
+            s.display_title = f"{s.sheet_name} (Mẫu template của trường)"
+        else:
+            s.display_title = f"{s.sheet_name} ({s.total_students} SV)"
 
 
 def _parse_openpyxl(content_bytes: bytes, filename: str) -> FormParseResult:
@@ -183,8 +227,6 @@ def _parse_openpyxl(content_bytes: bytes, filename: str) -> FormParseResult:
 
     wb = openpyxl.load_workbook(io.BytesIO(content_bytes), data_only=True)
     result = FormParseResult(filename=filename, file_type="xlsx")
-
-    primary_sheet_found = False
 
     for sname in wb.sheetnames:
         lower_sname = sname.lower()
@@ -202,19 +244,9 @@ def _parse_openpyxl(content_bytes: bytes, filename: str) -> FormParseResult:
         sheet_data = _analyze_and_extract_sheet_rows(sname, rows)
         result.sheets.append(sheet_data)
 
-    # Chọn primary sheet ưu tiên sheet có điểm số cao nhất (nhiều sinh viên & có Paper ID)
-    best_sheet = ""
-    best_score = -1
-    for s in result.sheets:
-        if s.sheet_type == "skip":
-            continue
-        score = s.total_students + (s.students_with_paper_id * 2)
-        if score > best_score:
-            best_score = score
-            best_sheet = s.sheet_name
-    result.primary_sheet_name = best_sheet
-
+    _finalize_sheet_metadata(result)
     return result
+
 
 
 def _analyze_and_extract_sheet_rows(sheet_name: str, rows: List[List[str]]) -> FormSheetData:
@@ -338,8 +370,9 @@ def _extract_computing_sheet(rows: List[List[str]], sheet_data: FormSheetData):
         greenwich_id = _clean_id_str(get_col("greenwich_id"))
         email = get_col("email").strip()
         full_name = get_col("full_name").strip()
-        paper_id = _clean_id_str(get_col("paper_id"))
+        paper_id = _clean_paper_id(get_col("paper_id"))
         moodle_shell = get_col("moodle_shell").strip()
+
         class_code = get_col("class_code").strip()
         lecturer = get_col("lecturer").strip()
         cohort = get_col("cohort").strip()
@@ -426,9 +459,10 @@ def _extract_business_sheet(rows: List[List[str]], sheet_data: FormSheetData):
         last_name = get_col("last_name").strip()
         first_name = get_col("first_name").strip()
         cohort = get_col("cohort").strip()
-        paper_id = _clean_id_str(get_col("paper_id"))
+        paper_id = _clean_paper_id(get_col("paper_id"))
 
         if not (greenwich_id or last_name or first_name):
+
             continue
 
         # Tạo họ tên đầy đủ
@@ -490,8 +524,9 @@ def _extract_generic_sheet(rows: List[List[str]], sheet_data: FormSheetData):
 
         s_id = _clean_id_str(get_col("id"))
         s_name = get_col("name").strip()
-        paper_id = _clean_id_str(get_col("paper_id"))
+        paper_id = _clean_paper_id(get_col("paper_id"))
         class_code = get_col("class").strip()
+
 
         if not (s_id or s_name):
             continue

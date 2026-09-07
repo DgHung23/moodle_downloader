@@ -42,6 +42,13 @@ const elements = {
   metaHasPaperId: document.getElementById("meta-has-paper-id"),
   metaClasses: document.getElementById("meta-classes"),
   btnStartMatching: document.getElementById("btn-start-matching"),
+  btnMatchText: document.getElementById("btn-match-text"),
+
+  stepMatchingProgressCard: document.getElementById("step-matching-progress-card"),
+  matchStatusText: document.getElementById("match-status-text"),
+  matchFractionDisplay: document.getElementById("match-fraction-display"),
+  matchPercentText: document.getElementById("match-percent-text"),
+  matchProgressFill: document.getElementById("match-progress-fill"),
 
   stepStudentsCard: document.getElementById("step-students-card"),
   matchSummaryDesc: document.getElementById("match-summary-desc"),
@@ -142,11 +149,19 @@ async function initSession() {
 
 async function verifyLecturerSession(sessionToken) {
   try {
+    elements.lecturerBadge.innerHTML = `
+      <span class="pulsing-dot" style="background: #3b82f6;"></span>
+      Đang kiểm tra phiên...
+    `;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
     const res = await fetch("/api/submissions/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session: sessionToken })
+      body: JSON.stringify({ session: sessionToken, session_id: sessionToken }),
+      signal: controller.signal
     });
+    clearTimeout(timeout);
     const data = await res.json();
     if (data.status === "ok" && data.is_lecturer) {
       elements.lecturerBadge.innerHTML = `
@@ -159,11 +174,17 @@ async function verifyLecturerSession(sessionToken) {
         <span class="pulsing-dot" style="background: #ef4444;"></span>
         Phiên chưa xác thực
       `;
+      elements.userDisplay.textContent = "Phiên chưa xác thực (Vui lòng kiểm tra lại Cookie)";
     }
   } catch (err) {
+    elements.lecturerBadge.innerHTML = `
+      <span class="pulsing-dot" style="background: #ef4444;"></span>
+      Lỗi kết nối phiên
+    `;
     console.error("Lỗi xác thực session:", err);
   }
 }
+
 
 // =====================================================================
 // 3. Drag & Drop and File Upload
@@ -291,10 +312,20 @@ function renderParsedMetadata(result) {
   sheets.forEach((sh) => {
     const btn = document.createElement("button");
     btn.className = `segmented-btn ${sh.sheet_name === defaultSheetName ? "active" : ""}`;
+    let icon = "📄";
+    let badgeLabel = "";
+    if (sh.is_primary) {
+      icon = "⭐";
+      badgeLabel = " (Bảng điểm chính)";
+    } else if (sh.is_template_sample) {
+      icon = "📋";
+      badgeLabel = " (Mẫu template)";
+    }
     btn.innerHTML = `
-      <span>📄 ${escapeHtml(sh.sheet_name)}</span>
-      <span class="badge-count" style="margin-left: 6px; font-size: 0.75rem; opacity: 0.85;">(${sh.total_students})</span>
+      <span>${icon} ${escapeHtml(sh.sheet_name)}</span>
+      <span class="badge-count" style="margin-left: 6px; font-size: 0.75rem; opacity: 0.9;">(${sh.total_students}${badgeLabel})</span>
     `;
+    btn.title = sh.is_primary ? "Bảng điểm thực tế của môn học" : "Sheet mẫu template mặc định của trường";
     btn.addEventListener("click", () => switchActiveSheet(sh.sheet_name));
     elements.sheetTabsContainer.appendChild(btn);
   });
@@ -351,10 +382,24 @@ async function startMatching() {
 
   state.isMatching = true;
   elements.btnStartMatching.disabled = true;
-  showLoading("Đang Đối Khớp Với Moodle Turnitin...", "Hệ thống đang quét các đợt nộp Turnitin của giảng viên để tìm bài nộp khớp với Paper ID và sinh viên trong Form.");
+  if (elements.btnMatchText) {
+    elements.btnMatchText.textContent = "⏳ Đang đối khớp dữ liệu...";
+  }
+
+  if (elements.stepMatchingProgressCard) {
+    elements.stepMatchingProgressCard.classList.remove("hidden");
+    elements.stepMatchingProgressCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  if (elements.matchProgressFill) elements.matchProgressFill.style.width = "0%";
+  if (elements.matchPercentText) elements.matchPercentText.textContent = "0%";
+  if (elements.matchFractionDisplay) elements.matchFractionDisplay.textContent = "0 / ... bài đã tìm thấy";
+  if (elements.matchStatusText) elements.matchStatusText.textContent = "Đang kết nối Greenwich Moodle...";
+
+  // Ẩn bảng kết quả cũ nếu có
+  elements.stepStudentsCard.classList.add("hidden");
 
   try {
-    const res = await fetch("/api/form-filter/match", {
+    const res = await fetch("/api/form-filter/start-match", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -363,23 +408,73 @@ async function startMatching() {
       })
     });
 
-    const data = await res.json();
-    hideLoading();
-    state.isMatching = false;
-    elements.btnStartMatching.disabled = false;
-
-    if (data.status === "ok") {
-      state.students = data.students || [];
-      showToast(`Đối khớp hoàn tất! Khớp ${data.summary.matched_count}/${data.summary.total_students} bài nộp.`, "success");
-      renderMatchedResults(data);
-    } else {
-      showToast(data.message || "Lỗi khi đối khớp bài nộp!", "error");
+    const startData = await res.json();
+    if (startData.status !== "ok") {
+      throw new Error(startData.message || "Không thể khởi động tiến trình đối khớp.");
     }
+
+    // Bắt đầu thăm dò tiến độ realtime
+    const pollInterval = setInterval(async () => {
+      try {
+        const sRes = await fetch("/api/form-filter/match-status");
+        const sData = await sRes.json();
+        if (sData.status === "ok") {
+          const pct = sData.progress_percent || 0;
+          if (elements.matchProgressFill) elements.matchProgressFill.style.width = `${pct}%`;
+          if (elements.matchPercentText) elements.matchPercentText.textContent = `${pct}%`;
+
+          const total = sData.total_students || 0;
+          const found = sData.found_count || 0;
+          if (elements.matchFractionDisplay) {
+            elements.matchFractionDisplay.textContent = `${found} / ${total} bài đã tìm thấy`;
+          }
+          if (elements.matchStatusText) {
+            elements.matchStatusText.textContent = sData.status_text || "Đang đối khớp bài nộp...";
+          }
+
+          if (sData.match_done || !sData.is_matching) {
+            clearInterval(pollInterval);
+            state.isMatching = false;
+            elements.btnStartMatching.disabled = false;
+            if (elements.btnMatchText) {
+              elements.btnMatchText.textContent = "🔍 Khớp Với Moodle & Kiểm Tra Bài Nộp";
+            }
+
+            if (elements.stepMatchingProgressCard) {
+              setTimeout(() => {
+                elements.stepMatchingProgressCard.classList.add("hidden");
+              }, 1200);
+            }
+
+            if (sData.match_error) {
+              showToast(`Lỗi: ${sData.match_error}`, "error");
+            } else {
+              state.students = sData.students || [];
+              const summary = sData.summary || {
+                total_students: total,
+                matched_count: found,
+                unmatched_count: total - found
+              };
+              showToast(`Đối khớp hoàn tất! Khớp ${summary.matched_count}/${summary.total_students} bài nộp.`, "success");
+              renderMatchedResults({ summary, students: state.students });
+            }
+          }
+        }
+      } catch (pollErr) {
+        console.error("Lỗi polling match-status:", pollErr);
+      }
+    }, 400);
+
   } catch (err) {
-    hideLoading();
     state.isMatching = false;
     elements.btnStartMatching.disabled = false;
-    showToast(`Lỗi kết nối: ${err.message}`, "error");
+    if (elements.btnMatchText) {
+      elements.btnMatchText.textContent = "🔍 Khớp Với Moodle & Kiểm Tra Bài Nộp";
+    }
+    if (elements.stepMatchingProgressCard) {
+      elements.stepMatchingProgressCard.classList.add("hidden");
+    }
+    showToast(`Lỗi đối khớp: ${err.message}`, "error");
   }
 }
 
@@ -468,14 +563,16 @@ function renderStudentsTable() {
     }
 
     // Match status pill
-    let statusPill = `<span class="status-pill status-missing">Chưa nộp bài</span>`;
+    let statusPill = `<span class="status-pill status-missing" title="${escapeHtml(st.verify_note || 'Chưa tìm thấy bài nộp')}">Chưa khớp</span>`;
     if (st.is_matched) {
       if (st.match_type === "paper_id") {
         statusPill = `<span class="status-pill status-paper" title="Khớp chính xác qua Turnitin Paper ID">✓ Khớp Paper ID</span>`;
+      } else if (st.match_type === "fpt_id") {
+        statusPill = `<span class="status-pill status-gwid" title="Khớp qua MSSV FPT trong tiêu đề bài nộp">✓ Khớp FPT ID</span>`;
       } else if (st.match_type === "greenwich_id") {
-        statusPill = `<span class="status-pill status-gwid">✓ Khớp MSSV</span>`;
+        statusPill = `<span class="status-pill status-gwid" title="Khớp qua Greenwich ID">✓ Khớp MSSV</span>`;
       } else {
-        statusPill = `<span class="status-pill status-name">✓ Khớp Họ Tên</span>`;
+        statusPill = `<span class="status-pill status-name" title="Khớp Họ tên sau kiểm tra tính duy nhất">✓ Khớp Họ Tên</span>`;
       }
     }
 
@@ -499,6 +596,7 @@ function renderStudentsTable() {
       <td>
         <div style="font-weight: 600; color: var(--text-primary);">${escapeHtml(st.full_name)}</div>
         <div style="font-size: 0.8rem; margin-top: 2px;">${idBadge}</div>
+        ${!st.is_matched && st.verify_note ? `<div style="font-size: 0.72rem; color: #f87171; margin-top: 4px; line-height: 1.3;">⚠️ ${escapeHtml(st.verify_note)}</div>` : ""}
       </td>
       <td>
         <span class="shell-badge">${escapeHtml(shellCode)}</span>
@@ -510,7 +608,8 @@ function renderStudentsTable() {
         <div style="font-size: 0.85rem; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(st.drop_title || "")}">
           ${escapeHtml(st.drop_title || "--")}
         </div>
-        ${st.part_name ? `<div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(st.part_name)}</div>` : ""}
+        ${st.submission_title ? `<div style="font-size: 0.75rem; color: #93c5fd; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(st.submission_title)}">📄 ${escapeHtml(st.submission_title)}</div>` : ""}
+        ${st.part_name ? `<div style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(st.part_name)}</div>` : ""}
       </td>
       <td style="text-align: center;">${simHtml}</td>
       <td style="text-align: center; font-weight: 600; font-size: 0.9rem;">${escapeHtml(st.grade || "--")}</td>
@@ -669,10 +768,8 @@ function startProgressPolling() {
         elements.btnStartDownload.disabled = false;
         elements.btnStopDownload.classList.add("hidden");
 
-        if (data.has_zip) {
-          elements.postDownloadBanner.classList.remove("hidden");
-          showToast("Hoàn tất tải bài nộp và đóng gói file ZIP thành công!", "success", 6000);
-        }
+        elements.postDownloadBanner.classList.remove("hidden");
+        showToast("Hoàn tất tải toàn bộ bài nộp thành công! Đã lưu vào thư mục sẵn sàng chấm điểm.", "success", 6000);
       }
     } catch (err) {
       console.error("Lỗi polling status:", err);

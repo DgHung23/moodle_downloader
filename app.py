@@ -85,6 +85,20 @@ class AppState:
         self.form_last_zip_path = ""
         self.form_last_zip_name = ""
 
+        # Tiến trình đối khớp bài nộp theo Form (Form Match Progress)
+        self.is_matching_form = False
+        self.match_progress_percent = 0
+        self.match_status_text = ""
+        self.match_found_count = 0
+        self.match_total_students = 0
+        self.match_current_drop_name = ""
+        self.match_done = False
+        self.match_error = ""
+        self.match_candidate_courses: List[Dict] = []
+        self.match_drops_matched: List[Dict] = []
+
+
+
     def add_log(self, message: str, log_type: str = "info"):
         with self.lock:
             timestamp = time.strftime("%H:%M:%S")
@@ -625,10 +639,19 @@ def submission_download_worker(
 def submissions_verify():
     try:
         data = request.json or {}
-        manual_session = data.get("session_id", "").strip()
+        manual_session = (data.get("session_id") or data.get("session") or "").strip()
 
-        session, msg = resolve_session(manual_session)
-        state.session = session
+        if manual_session:
+            session, msg = resolve_session(manual_session)
+            state.session = session
+        elif state.session:
+            session = state.session
+        else:
+            return {
+                "status": "error",
+                "is_lecturer": False,
+                "message": "Chưa có phiên MoodleSession. Vui lòng nhập cookie!"
+            }
 
         crawler = TurnitinSubmissionCrawler(session=session)
         verify_res = crawler.verify_lecturer_role()
@@ -641,7 +664,8 @@ def submissions_verify():
             "message": verify_res.get("message", "")
         }
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return {"status": "error", "is_lecturer": False, "message": str(e)}
+
 
 
 # API: Lấy danh sách Môn học đã gộp lớp (Subject-Centric) dành cho Giảng viên
@@ -1203,17 +1227,6 @@ def open_submissions_folder():
 # API: TẢI BÀI NỘP THEO BỘ LỌC FORM EXCEL (Form.xls / .xlsx)
 # =====================================================================
 
-def _normalize_name_tokens(name: str) -> set:
-    if not name:
-        return set()
-    import unicodedata
-    n = unicodedata.normalize('NFD', name)
-    n = ''.join(c for c in n if unicodedata.category(c) != 'Mn')
-    n = n.replace('đ', 'd').replace('Đ', 'D')
-    tokens = re.sub(r'[^a-zA-Z0-9\s]', ' ', n).lower().split()
-    return set(tokens)
-
-
 @app.route("/api/form-filter/parse", method="POST")
 def api_form_filter_parse():
     try:
@@ -1274,33 +1287,34 @@ def api_form_filter_load_sample():
         return {"status": "error", "message": f"Lỗi nạp file mẫu: {str(e)}"}
 
 
-@app.route("/api/form-filter/match", method="POST")
-def api_form_filter_match():
+def _normalize_name_tokens(name: str) -> List[str]:
+    if not name:
+        return []
+    import unicodedata
+    n = unicodedata.normalize('NFD', name)
+    n = ''.join(c for c in n if unicodedata.category(c) != 'Mn')
+    n = n.replace('đ', 'd').replace('Đ', 'D')
+    tokens = re.sub(r'[^a-zA-Z0-9\s]', ' ', n).lower().split()
+    return tokens
+
+
+def run_form_matching(target_sheet: FormSheetData, session: requests.Session):
+    """
+    Tiến trình chạy ngầm đối khớp sinh viên trong Form với Turnitin Moodle.
+    Áp dụng cơ chế thẩm định chặt chẽ (Strict Verification) và cập nhật tiến trình realtime.
+    """
     try:
-        import concurrent.futures
-        body = request.json or {}
-        sheet_name = body.get("sheet_name", "").strip()
-        user_session = body.get("session", "").strip()
+        state.is_matching_form = True
+        state.match_done = False
+        state.match_error = ""
+        state.match_progress_percent = 5
+        state.match_found_count = 0
+        state.match_total_students = len(target_sheet.students)
+        state.match_status_text = f"Đang chuẩn bị phiên Moodle & nạp lớp học cho môn {target_sheet.course_code or 'Form'}..."
 
-        if not state.form_last_parsed:
-            return {"status": "error", "message": "Vui lòng tải lên file Excel Form trước khi đối khớp!"}
-
-        # Tìm sheet được chọn
-        target_sheet = None
-        if sheet_name:
-            target_sheet = next((s for s in state.form_last_parsed.sheets if s.sheet_name == sheet_name), None)
-        if not target_sheet:
-            target_sheet = next((s for s in state.form_last_parsed.sheets if s.sheet_name == state.form_last_parsed.primary_sheet_name), None)
-        if not target_sheet and state.form_last_parsed.sheets:
-            target_sheet = state.form_last_parsed.sheets[0]
-
-        if not target_sheet:
-            return {"status": "error", "message": "Không tìm thấy sheet dữ liệu hợp lệ trong file Excel!"}
-
-        session, _ = resolve_session(user_session)
         crawler = TurnitinSubmissionCrawler(session)
 
-        # Lấy danh sách khóa học của giảng viên (tận dụng cache)
+        # 1. Lấy danh sách khóa học của giảng viên (tận dụng cache)
         if not state.cached_courses:
             moodle_crawler = MoodleCrawler(session)
             state.cached_courses = moodle_crawler.get_enrolled_courses()
@@ -1308,7 +1322,8 @@ def api_form_filter_match():
         raw_course_code = target_sheet.course_code or ""
         clean_code = re.sub(r'[^a-zA-Z0-9]', '', raw_course_code).lower()
 
-        state.add_form_log(f"Bắt đầu đối khớp Form '{target_sheet.sheet_name}' (Mã môn: {raw_course_code or 'Tất cả'})...", "info")
+        state.match_progress_percent = 15
+        state.match_status_text = "Đang đối chiếu mã môn và lọc danh sách lớp liên quan..."
 
         def _get_course_meta(c):
             if hasattr(c, "id"):
@@ -1329,7 +1344,6 @@ def api_form_filter_match():
             if clean_code and clean_code in clean_c_text:
                 candidate_courses.append((cid, cname))
 
-        # Nếu không khớp mã môn chính xác, thử tìm theo tên môn hoặc lấy 10 môn đầu
         if not candidate_courses and target_sheet.course_title:
             title_clean = re.sub(r'[^a-zA-Z0-9]', '', target_sheet.course_title).lower()
             for c in state.cached_courses:
@@ -1343,7 +1357,7 @@ def api_form_filter_match():
                 if cid:
                     candidate_courses.append((cid, cname))
 
-        # Nếu sheet có danh sách classes (VD: ['M01', 'M02', 'M04']), chỉ lọc các khóa học thuộc các lớp này
+        # Nếu sheet có danh sách classes (VD: ['M01', 'M02', 'M04']), chỉ quét đúng các lớp này để tối ưu thời gian
         if target_sheet.classes and len(candidate_courses) > 1:
             class_filtered = []
             for cid, cname in candidate_courses:
@@ -1354,36 +1368,38 @@ def api_form_filter_match():
             if class_filtered:
                 candidate_courses = class_filtered
 
-        state.add_form_log(f"Tìm thấy {len(candidate_courses)} khóa học Moodle liên quan. Đang quét đợt nộp Turnitin...", "info")
+        state.match_candidate_courses = [{"id": cid, "name": cname} for cid, cname in candidate_courses]
 
-        # Thu thập các đợt nộp cần quét
+        # 2. Thu thập các đợt nộp cần quét (bỏ qua Resit / EC nếu là bài Coursework thường để tăng tốc)
         assess_term = re.sub(r'[^a-zA-Z0-9]', '', target_sheet.assessment_title).lower() if target_sheet.assessment_title else ""
         drops_to_scan = []
 
         for cid, cname in candidate_courses:
             drops = crawler.get_course_submission_drops(cid)
             for d in drops:
-                dt = d.title.lower()
-                # Nếu là Coursework chính, bỏ qua đợt RESIT để tăng tốc
-                if "coursework" in assess_term and "resit" in dt:
-                    continue
                 drops_to_scan.append((cid, cname, d))
 
+
         if not drops_to_scan:
-            # Fallback lấy tất cả đợt nộp nếu lọc quá hẹp
             for cid, cname in candidate_courses:
                 for d in crawler.get_course_submission_drops(cid):
                     drops_to_scan.append((cid, cname, d))
 
-        state.add_form_log(f"Đang quét song song {len(drops_to_scan)} đợt nộp Turnitin...", "info")
+        total_drops = len(drops_to_scan)
+        state.match_progress_percent = 25
+        state.match_status_text = f"Đã tìm thấy {len(candidate_courses)} lớp và {total_drops} đợt nộp Turnitin. Bắt đầu quét..."
 
         paper_id_index: Dict[str, Dict[str, Any]] = {}
         gw_id_index: Dict[str, Dict[str, Any]] = {}
-        name_index: List[Tuple[set, Dict[str, Any]]] = []
+        fpt_id_index: Dict[str, Dict[str, Any]] = {}
+        all_submissions_collected: List[Dict[str, Any]] = []
         drops_matched: List[Dict[str, Any]] = []
 
-        # Hàm worker chạy song song cho từng đợt nộp
+        # Tập hợp các Paper ID hợp lệ (>= 7 chữ số) cần tìm
+        target_paper_ids = {s.paper_id for s in target_sheet.students if s.has_paper_id and len(s.paper_id) >= 7}
+
         moodle_session_val = session.cookies.get("MoodleSession", "")
+
         def fetch_single_drop(item):
             cid_w, cname_w, drop_w = item
             thread_s = requests.Session()
@@ -1401,56 +1417,81 @@ def api_form_filter_match():
                     collected.append((cid_w, cname_w, drop_w, details_w, part_w, sub_w))
             return collected
 
+        # 3. Quét song song đa luồng ThreadPoolExecutor
+        import concurrent.futures
+        completed_drops = 0
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            all_collected_batches = list(executor.map(fetch_single_drop, drops_to_scan))
+            future_to_drop = {executor.submit(fetch_single_drop, item): item for item in drops_to_scan}
+            for future in concurrent.futures.as_completed(future_to_drop):
+                completed_drops += 1
+                cur_cid, cur_cname, cur_drop = future_to_drop[future]
+                clean_drop_label = f"{cur_drop.title} ({cur_cname[:20]}...)"
+                state.match_current_drop_name = clean_drop_label
 
-        seen_drop_keys = set()
-        for batch in all_collected_batches:
-            for cid_i, cname_i, drop_i, details_i, part_i, sub_i in batch:
-                drop_key = f"{drop_i.cm_id}_{part_i.part_id}"
-                if sub_i.paper_id or sub_i.has_submission:
-                    if drop_key not in seen_drop_keys:
-                        seen_drop_keys.add(drop_key)
-                        drops_matched.append({
+                try:
+                    batch = future.result()
+                    for cid_i, cname_i, drop_i, details_i, part_i, sub_i in batch:
+                        drop_key = f"{drop_i.cm_id}_{part_i.part_id}"
+                        if sub_i.paper_id or sub_i.has_submission:
+                            if not any(d.get("drop_key") == drop_key for d in drops_matched):
+                                drops_matched.append({
+                                    "drop_key": drop_key,
+                                    "course_id": cid_i,
+                                    "course_name": cname_i,
+                                    "cm_id": drop_i.cm_id,
+                                    "drop_title": drop_i.title,
+                                    "part_id": part_i.part_id,
+                                    "part_name": part_i.part_name,
+                                })
+
+                        sub_meta = {
+                            "sub": sub_i,
                             "course_id": cid_i,
-                            "course_name": cname_i,
-                            "cm_id": drop_i.cm_id,
-                            "drop_title": drop_i.title,
+                            "drop": drop_i,
+                            "details": details_i,
+                            "part": part_i,
+                            "drop_url": drop_i.url,
+                            "assignment_id": details_i.assignment_id,
                             "part_id": part_i.part_id,
-                            "part_name": part_i.part_name,
-                        })
+                            "paper_id": sub_i.paper_id,
+                            "student_id": sub_i.student_id,
+                            "student_name": sub_i.student_name,
+                            "submission_title": sub_i.submission_title,
+                            "submitted_at": sub_i.submitted_at,
+                            "similarity_text": sub_i.similarity_text,
+                            "grade": sub_i.grade,
+                            "course_name": cname_i,
+                            "drop_title": drop_i.title,
+                            "part_name": part_i.part_name
+                        }
+                        all_submissions_collected.append(sub_meta)
 
-                sub_meta = {
-                    "sub": sub_i,
-                    "course_id": cid_i,
-                    "drop": drop_i,
-                    "details": details_i,
-                    "part": part_i,
-                    "drop_url": drop_i.url,
-                    "assignment_id": details_i.assignment_id,
-                    "part_id": part_i.part_id,
-                    "paper_id": sub_i.paper_id,
-                    "student_id": sub_i.student_id,
-                    "student_name": sub_i.student_name,
-                    "submission_title": sub_i.submission_title,
-                    "submitted_at": sub_i.submitted_at,
-                    "similarity_text": sub_i.similarity_text,
-                    "grade": sub_i.grade,
-                    "course_name": cname_i,
-                    "drop_title": drop_i.title,
-                    "part_name": part_i.part_name
-                }
+                        if sub_i.paper_id and len(sub_i.paper_id) >= 7 and sub_i.paper_id.isdigit():
+                            paper_id_index[sub_i.paper_id] = sub_meta
+                        if sub_i.student_id:
+                            gw_id_index[sub_i.student_id] = sub_meta
 
-                if sub_i.paper_id:
-                    paper_id_index[sub_i.paper_id] = sub_meta
-                if sub_i.student_id:
-                    gw_id_index[sub_i.student_id] = sub_meta
+                        # Bóc tách FPT ID từ tiêu đề bài nộp (VD: GCS220046, GCH230084)
+                        if sub_i.submission_title:
+                            fpt_m = re.findall(r'(g[a-zA-Z]{2}\d{6})', sub_i.submission_title, re.IGNORECASE)
+                            for fid in fpt_m:
+                                fpt_id_index[fid.lower()] = sub_meta
 
-                name_tokens = _normalize_name_tokens(sub_i.student_name)
-                if len(name_tokens) >= 2:
-                    name_index.append((name_tokens, sub_meta))
+                except Exception:
+                    pass
 
-        # Đối khớp từng sinh viên trong Form
+                # Cập nhật tiến trình theo đợt nộp đã quét và số bài tìm thấy
+                found_so_far = sum(1 for pid in target_paper_ids if pid in paper_id_index)
+                state.match_found_count = found_so_far
+                pct = int(25 + (completed_drops / max(1, total_drops)) * 62)
+                state.match_progress_percent = min(88, pct)
+                state.match_status_text = f"Đang quét đợt nộp ({completed_drops}/{total_drops}): {clean_drop_label} | Đã tìm thấy {found_so_far}/{len(target_sheet.students)} bài"
+
+        state.match_progress_percent = 90
+        state.match_status_text = "Đang thẩm định nghiêm ngặt kết quả và thông tin sinh viên..."
+
+        # 4. ĐỐI KHỚP TỪNG SINH VIÊN VỚI BỘ QUY TẮC THẨM ĐỊNH CHẶT CHẼ (STRICT VERIFICATION)
         matched_students = []
         matched_count = 0
 
@@ -1459,34 +1500,77 @@ def api_form_filter_match():
             is_matched = False
             match_type = "none"
             match_info = None
+            verify_note = ""
 
-            # 1. Khớp theo Paper ID (Độ tin cậy tuyệt đối)
-            if st.paper_id and st.paper_id in paper_id_index:
-                is_matched = True
-                match_type = "paper_id"
-                match_info = paper_id_index[st.paper_id]
-
-            # 2. Khớp theo Greenwich ID (nếu có trong chỉ mục)
-            elif st.greenwich_id and st.greenwich_id in gw_id_index:
-                is_matched = True
-                match_type = "greenwich_id"
-                match_info = gw_id_index[st.greenwich_id]
-
-            # 3. Khớp mờ theo Họ tên
-            elif st.full_name:
-                st_tokens = _normalize_name_tokens(st.full_name)
-                best_sub = None
-                max_overlap = 0
-                for n_tokens, meta in name_index:
-                    overlap = len(st_tokens.intersection(n_tokens))
-                    if overlap >= 2 and overlap > max_overlap:
-                        max_overlap = overlap
-                        best_sub = meta
-
-                if best_sub and max_overlap >= 2:
+            # Quy tắc 1: Khớp theo Turnitin Paper ID (Độ tin cậy tuyệt đối)
+            # Chỉ khớp nếu Paper ID là chuỗi toàn số và có độ dài >= 7 chữ số.
+            if st.has_paper_id and st.paper_id and len(st.paper_id) >= 7 and st.paper_id.isdigit():
+                if st.paper_id in paper_id_index:
                     is_matched = True
-                    match_type = "name"
-                    match_info = best_sub
+                    match_type = "paper_id"
+                    match_info = paper_id_index[st.paper_id]
+                else:
+                    verify_note = f"Paper ID {st.paper_id} không tìm thấy trong các đợt nộp đã quét."
+
+            # Quy tắc 2: Khớp theo FPT ID hoặc Greenwich ID trong tiêu đề nộp bài
+            if not is_matched:
+                if st.fpt_id and st.fpt_id.lower() in fpt_id_index:
+                    is_matched = True
+                    match_type = "fpt_id"
+                    match_info = fpt_id_index[st.fpt_id.lower()]
+                elif st.greenwich_id and st.greenwich_id in gw_id_index:
+                    is_matched = True
+                    match_type = "greenwich_id"
+                    match_info = gw_id_index[st.greenwich_id]
+
+            # Quy tắc 3: Khớp theo Họ Tên - CƠ CHẾ NGHIÊM NGẶT (STRICT VERIFICATION)
+            # TUYỆT ĐỐI KHÔNG DÙNG OVERLAP 2 TỪ TRÊN HỌ TÊN 3-4 TỪ (TRÁNH LỖI NHẦM LẪN NHƯ NGUYỄN GIA HUY)
+            if not is_matched and st.full_name:
+                st_tokens = _normalize_name_tokens(st.full_name)
+                # Ví dụ: "Nguyễn Gia Huy" -> ["nguyen", "gia", "huy"]
+                if len(st_tokens) >= 2:
+                    candidates_exact = []
+                    for cand in all_submissions_collected:
+                        sub_name_tokens = _normalize_name_tokens(cand["student_name"])
+
+                        # Kiểm tra xem tên trên Moodle có chứa từ nào mâu thuẫn không
+                        # Ví dụ: "Nguyen Truong Huy" có từ "truong" mà trong Form là "gia" -> LOẠI TRỪ NGAY!
+                        has_contradiction = False
+                        for word in sub_name_tokens:
+                            if len(word) >= 3 and word not in st_tokens:
+                                has_contradiction = True
+                                break
+                        if has_contradiction:
+                            continue
+
+                        # Tên chính (Given name - từ cuối cùng) và Họ (từ đầu tiên) PHẢI trùng khớp
+                        if sub_name_tokens and st_tokens:
+                            if sub_name_tokens[-1] == st_tokens[-1] and sub_name_tokens[0] == st_tokens[0]:
+                                if len(sub_name_tokens) >= 3:
+                                    # Nếu tên Moodle có đủ 3 từ trở lên, bắt buộc phải trùng hoàn toàn
+                                    if sub_name_tokens == st_tokens:
+                                        candidates_exact.append(cand)
+                                else:
+                                    # Moodle chỉ hiện 2 từ (VD: "Nguyen Huy")
+                                    candidates_exact.append(cand)
+
+                    # Chỉ chấp nhận nếu tìm thấy DUY NHẤT 1 sinh viên trong đợt nộp và không có mâu thuẫn
+                    if len(candidates_exact) == 1:
+                        cand = candidates_exact[0]
+                        st_fpt_clean = re.sub(r'[^a-zA-Z0-9]', '', st.fpt_id).lower()
+                        title_clean = cand["submission_title"].lower()
+                        # Nếu tiêu đề chứa mã FPT ID của người khác (VD: GCS... khác) -> Loại trừ
+                        if st_fpt_clean and any(p in title_clean for p in ["gcs", "gch", "gcd", "gcb"]) and st_fpt_clean not in title_clean:
+                            verify_note = "Tiêu đề bài nộp chứa MSSV khác, đã hủy ghép nối để đảm bảo tính chính xác."
+                        else:
+                            is_matched = True
+                            match_type = "name_verified"
+                            match_info = cand
+                    elif len(candidates_exact) > 1:
+                        verify_note = "Trùng tên với nhiều sinh viên trên Moodle, cần Paper ID để phân biệt."
+                    else:
+                        if not verify_note:
+                            verify_note = "Không tìm thấy bài nộp trùng khớp chính xác trên Moodle."
 
             if is_matched and match_info:
                 matched_count += 1
@@ -1503,13 +1587,17 @@ def api_form_filter_match():
                 st_dict["submitted_at"] = match_info["submitted_at"]
                 st_dict["similarity_text"] = match_info["similarity_text"]
                 st_dict["grade"] = match_info["grade"]
+                st_dict["verify_note"] = "✅ Khớp chính xác"
             else:
                 st_dict["is_matched"] = False
                 st_dict["match_type"] = "none"
+                st_dict["verify_note"] = verify_note or "Chưa có Paper ID hợp lệ hoặc chưa nộp bài."
 
             matched_students.append(st_dict)
 
         state.form_matched_items = matched_students
+        state.match_drops_matched = drops_matched
+        state.match_found_count = matched_count
         state.form_matched_summary = {
             "sheet_name": target_sheet.sheet_name,
             "course_code": target_sheet.course_code,
@@ -1522,22 +1610,94 @@ def api_form_filter_match():
             "drops_count": len(drops_matched)
         }
 
+        state.match_progress_percent = 100
+        state.match_status_text = f"Hoàn tất đối khớp: Đã tìm thấy {matched_count}/{len(matched_students)} bài nộp hợp lệ."
+        state.match_done = True
         state.add_form_log(
             f"Đối khớp hoàn tất! Khớp {matched_count}/{len(matched_students)} bài nộp của sinh viên.",
             "success" if matched_count > 0 else "warning"
         )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        state.match_error = str(e)
+        state.match_status_text = f"Lỗi đối khớp: {str(e)}"
+        state.match_done = True
+    finally:
+        state.is_matching_form = False
+
+
+@app.route("/api/form-filter/match", method="POST")
+@app.route("/api/form-filter/start-match", method="POST")
+def api_form_filter_match():
+    """Khởi động tiến trình đối khớp ngầm có thanh tiến trình realtime"""
+    try:
+        body = request.json or {}
+        sheet_name = body.get("sheet_name", "").strip()
+        user_session = (body.get("session") or body.get("session_id") or "").strip()
+
+        if not state.form_last_parsed:
+            return {"status": "error", "message": "Vui lòng tải lên file Excel Form trước khi đối khớp!"}
+
+        if state.is_matching_form:
+            return {
+                "status": "ok",
+                "message": "Tiến trình đối khớp đang chạy...",
+                "is_matching": True
+            }
+
+        # Tìm sheet được chọn
+        target_sheet = None
+        if sheet_name:
+            target_sheet = next((s for s in state.form_last_parsed.sheets if s.sheet_name == sheet_name), None)
+        if not target_sheet:
+            target_sheet = next((s for s in state.form_last_parsed.sheets if s.sheet_name == state.form_last_parsed.primary_sheet_name), None)
+        if not target_sheet and state.form_last_parsed.sheets:
+            target_sheet = state.form_last_parsed.sheets[0]
+
+        if not target_sheet:
+            return {"status": "error", "message": "Không tìm thấy sheet dữ liệu hợp lệ trong file Excel!"}
+
+        session, _ = resolve_session(user_session)
+
+        # Bắt đầu thread chạy ngầm
+        t = threading.Thread(
+            target=run_form_matching,
+            args=(target_sheet, session),
+            daemon=True
+        )
+        t.start()
 
         return {
             "status": "ok",
-            "summary": state.form_matched_summary,
-            "courses_matched": [{"id": cid, "name": cname} for cid, cname in candidate_courses],
-            "drops_matched": drops_matched,
-            "students": matched_students
+            "message": f"Bắt đầu đối khớp cho sheet '{target_sheet.sheet_name}' ({len(target_sheet.students)} sinh viên)...",
+            "total_students": len(target_sheet.students)
         }
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {"status": "error", "message": f"Lỗi đối khớp bài nộp: {str(e)}"}
+        return {"status": "error", "message": f"Lỗi khi khởi động đối khớp: {str(e)}"}
+
+
+@app.route("/api/form-filter/match-status", method="GET")
+def api_form_filter_match_status():
+    """API thăm dò tiến độ đối khớp realtime"""
+    return {
+        "status": "ok",
+        "is_matching": state.is_matching_form,
+        "progress_percent": state.match_progress_percent,
+        "status_text": state.match_status_text,
+        "found_count": state.match_found_count,
+        "total_students": state.match_total_students,
+        "current_drop": state.match_current_drop_name,
+        "match_done": state.match_done,
+        "match_error": state.match_error,
+        "summary": state.form_matched_summary,
+        "courses_matched": state.match_candidate_courses,
+        "drops_matched": state.match_drops_matched,
+        "students": state.form_matched_items if state.match_done else []
+    }
+
 
 
 @app.route("/api/form-filter/start-download", method="POST")
@@ -1738,25 +1898,16 @@ def api_form_filter_start_download():
             report_file = save_dir / "BÁO_CÁO_TỔNG_HỢP.txt"
             report_file.write_text(report_content, encoding="utf-8")
 
-            # Đóng gói thư mục thành file ZIP
-            state.add_form_log("Đang đóng gói file ZIP hoàn chỉnh...", "info")
-            zip_filename = f"{folder_name}.zip"
-            zip_target_path = Path(FORM_SUBMISSIONS_DIR) / zip_filename
-
-            with zipfile.ZipFile(zip_target_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                for root, _, files in os.walk(save_dir):
-                    for f in files:
-                        fp = Path(root) / f
-                        zf.write(fp, fp.relative_to(save_dir.parent))
-
+            # Bỏ nén ZIP theo yêu cầu để tối ưu tốc độ tải và giảm tiêu hao CPU
             state.form_last_folder_path = str(save_dir.resolve())
-            state.form_last_zip_path = str(zip_target_path.resolve())
-            state.form_last_zip_name = zip_filename
+            state.form_last_zip_path = ""
+            state.form_last_zip_name = ""
 
             state.add_form_log(
-                f"🎉 HOÀN TẤT TẢI FORM: Đã tải {len(downloaded_records)}/{len(target_students)} bài nộp. File ZIP: {zip_filename}",
+                f"🎉 HOÀN TẤT TẢI FORM: Đã lưu {len(downloaded_records)}/{len(target_students)} bài nộp vào thư mục '{folder_name}'. Giảng viên có thể mở thư mục để chấm điểm ngay!",
                 "success"
             )
+
 
         except Exception as e:
             import traceback
